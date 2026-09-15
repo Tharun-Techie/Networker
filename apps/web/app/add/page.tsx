@@ -37,6 +37,35 @@ export default function AddPage() {
   const [vActor, setVActor] = useState("");
   const [vMsg, setVMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
+  // --- hierarchy builders (share the step-3 evidence source) ---
+  const [subParent, setSubParent] = useState<GraphNode | null>(null);
+  const [subMode, setSubMode] = useState<"existing" | "new">("existing");
+  const [subChild, setSubChild] = useState<GraphNode | null>(null);
+  const [subNewName, setSubNewName] = useState("");
+  const [subNewIndustry, setSubNewIndustry] = useState("");
+  const [subMsg, setSubMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const [famPerson, setFamPerson] = useState<GraphNode | null>(null);
+  const [famRel, setFamRel] = useState<"child" | "parent" | "spouse" | "sibling">("child");
+  const [famMode, setFamMode] = useState<"existing" | "new">("new");
+  const [famOther, setFamOther] = useState<GraphNode | null>(null);
+  const [famNewName, setFamNewName] = useState("");
+  const [famMsg, setFamMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const [repEmp, setRepEmp] = useState<GraphNode | null>(null);
+  const [repMgr, setRepMgr] = useState<GraphNode | null>(null);
+  const [repMsg, setRepMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const [mgrNode, setMgrNode] = useState<GraphNode | null>(null);
+  const [mgrEdges, setMgrEdges] = useState<
+    Array<{ id: string; rel_type: string; other: string; confidence: string }>
+  >([]);
+  const [mgrMsg, setMgrMsg] = useState("");
+
+  const needSource = () => {
+    if (!source.trim()) throw new Error("Set an evidence source first (step 2 → Use as source).");
+  };
+
   const relGroups = Object.entries(REL_CATEGORIES)
     .map(([cat, rels]) => ({
       cat,
@@ -119,12 +148,123 @@ export default function AddPage() {
     }
   };
 
+  const submitSubsidiary = async () => {
+    setSubMsg(null);
+    try {
+      if (!subParent) throw new Error("Pick the parent organization first.");
+      needSource();
+      let child = subChild;
+      if (subMode === "new") {
+        if (!subNewName.trim()) throw new Error("Enter the subsidiary name.");
+        child = await api.createNode({
+          type: "Organization",
+          name: subNewName.trim(),
+          attributes: subNewIndustry.trim() ? { industry: subNewIndustry.trim() } : {},
+        });
+      }
+      if (!child) throw new Error("Pick (or create) the subsidiary.");
+      await api.createEdge({
+        rel_type: "owns",
+        from_id: subParent.id,
+        to_id: child.id,
+        source: source.trim(),
+        confidence: "unconfirmed",
+        note: "Added via hierarchy builder",
+      });
+      setSubMsg({ ok: true, text: `${child.name} is now a subsidiary of ${subParent.name}.` });
+      setSubChild(null);
+      setSubNewName("");
+    } catch (e) {
+      setSubMsg({ ok: false, text: e instanceof Error ? e.message : "Failed" });
+    }
+  };
+
+  const submitFamily = async () => {
+    setFamMsg(null);
+    try {
+      if (!famPerson) throw new Error("Pick the person first.");
+      needSource();
+      let other = famOther;
+      if (famMode === "new") {
+        if (!famNewName.trim()) throw new Error("Enter the relative's name.");
+        other = await api.createNode({ type: "Person", name: famNewName.trim() });
+      }
+      if (!other) throw new Error("Pick (or create) the relative.");
+      const P = famPerson.id;
+      const X = other.id;
+      const edge =
+        famRel === "child"
+          ? { rel_type: "parent_of", from_id: P, to_id: X }
+          : famRel === "parent"
+            ? { rel_type: "parent_of", from_id: X, to_id: P }
+            : famRel === "spouse"
+              ? { rel_type: "spouse_of", from_id: P, to_id: X }
+              : { rel_type: "sibling_of", from_id: P, to_id: X };
+      await api.createEdge({ ...edge, source: source.trim(), confidence: "unconfirmed" });
+      setFamMsg({ ok: true, text: `${other.name} recorded as ${famPerson.name}'s ${famRel}.` });
+      setFamOther(null);
+      setFamNewName("");
+    } catch (e) {
+      setFamMsg({ ok: false, text: e instanceof Error ? e.message : "Failed" });
+    }
+  };
+
+  const submitReport = async () => {
+    setRepMsg(null);
+    try {
+      if (!repEmp || !repMgr) throw new Error("Pick both the employee and the manager.");
+      needSource();
+      await api.createEdge({
+        rel_type: "reports_to",
+        from_id: repEmp.id,
+        to_id: repMgr.id,
+        source: source.trim(),
+        confidence: "unconfirmed",
+      });
+      setRepMsg({ ok: true, text: `${repEmp.name} now reports to ${repMgr.name}.` });
+    } catch (e) {
+      setRepMsg({ ok: false, text: e instanceof Error ? e.message : "Failed" });
+    }
+  };
+
+  const loadMgrEdges = async (node: GraphNode | null) => {
+    setMgrNode(node);
+    setMgrEdges([]);
+    setMgrMsg("");
+    if (!node) return;
+    try {
+      const g = await api.expand(node.id, 1);
+      const names = new Map(g.nodes.map((n) => [n.id, n.name]));
+      setMgrEdges(
+        g.edges.map((e) => ({
+          id: e.id,
+          rel_type: e.rel_type,
+          other: names.get(e.from_id === node.id ? e.to_id : e.from_id) ?? "?",
+          confidence: e.confidence,
+        })),
+      );
+    } catch (e) {
+      setMgrMsg(e instanceof Error ? e.message : "Failed to load links");
+    }
+  };
+
+  const removeEdge = async (edgeId: string, label: string) => {
+    if (!window.confirm(`Remove this link?\n\n${label}\n\nThe nodes stay; only the relationship is deleted.`))
+      return;
+    try {
+      await api.deleteEdge(edgeId);
+      setMgrEdges((list) => list.filter((e) => e.id !== edgeId));
+    } catch (e) {
+      setMgrMsg(e instanceof Error ? e.message : "Delete failed");
+    }
+  };
+
   return (
     <>
       <Nav />
       <main className="nw-main">
         <h2>Add to the graph</h2>
-        <p className="subtle">Entities first, then evidence, then relationships. Every edge needs a source.</p>
+        <p className="subtle">Entities first, then evidence, then relationships — or grow a hierarchy directly in step 5. Every edge needs a source.</p>
 
         <div className="card">
           <h3>1 · Entity</h3>
@@ -447,6 +587,187 @@ export default function AddPage() {
           </div>
           {vMsg &&
             (vMsg.ok ? <p className="mt">✅ {vMsg.text}</p> : <div className="err">{vMsg.text}</div>)}
+        </div>
+
+        <div className="card">
+          <h3>5 · Hierarchy</h3>
+          <p className="tiny">
+            Grow ownership trees, family trees, and reporting lines — or remove a wrong link.
+            Builders reuse the evidence source from step 3{" "}
+            {source ? (
+              <span>
+                (<strong>{sourceTitle || source.slice(0, 8)}</strong> ✅)
+              </span>
+            ) : (
+              <em>(none set — save evidence in step 2 first)</em>
+            )}
+            .
+          </p>
+
+          <h4>Add subsidiary</h4>
+          <div className="row wrap">
+            <div style={{ flex: 1, minWidth: 240 }}>
+              <NodePicker label="Parent organization" value={subParent} onPick={setSubParent} />
+            </div>
+            <div style={{ flex: 1, minWidth: 240 }}>
+              <div className="row" style={{ marginBottom: 6 }}>
+                {(["existing", "new"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    className="chip"
+                    aria-pressed={subMode === m}
+                    onClick={() => setSubMode(m)}
+                  >
+                    {m === "existing" ? "Pick existing" : "Create new"}
+                  </button>
+                ))}
+              </div>
+              {subMode === "existing" ? (
+                <NodePicker label="Subsidiary" value={subChild} onPick={setSubChild} />
+              ) : (
+                <>
+                  <label className="flabel">New subsidiary name</label>
+                  <input
+                    value={subNewName}
+                    onChange={(e) => setSubNewName(e.target.value)}
+                    placeholder="e.g. Jaguar Land Rover"
+                    style={{ width: "100%" }}
+                  />
+                  <div className="mt">
+                    <label className="flabel">Industry (optional)</label>
+                    <input
+                      value={subNewIndustry}
+                      onChange={(e) => setSubNewIndustry(e.target.value)}
+                      placeholder="e.g. Automotive"
+                      style={{ width: "100%" }}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+          <div className="mt">
+            <button className="btn-primary" onClick={submitSubsidiary}>
+              Add subsidiary
+            </button>
+          </div>
+          {subMsg &&
+            (subMsg.ok ? (
+              <p className="mt">✅ {subMsg.text}</p>
+            ) : (
+              <div className="err">{subMsg.text}</div>
+            ))}
+
+          <h4>Add family member</h4>
+          <div className="row wrap">
+            <div style={{ flex: 1, minWidth: 240 }}>
+              <NodePicker label="Person" value={famPerson} onPick={setFamPerson} />
+            </div>
+            <div style={{ flex: 1, minWidth: 240 }}>
+              <label className="flabel">The other person is their…</label>
+              <div className="row wrap">
+                {(["child", "parent", "spouse", "sibling"] as const).map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    className="chip"
+                    aria-pressed={famRel === r}
+                    onClick={() => setFamRel(r)}
+                  >
+                    {r}
+                  </button>
+                ))}
+              </div>
+              <div className="row mt" style={{ marginBottom: 6 }}>
+                {(["existing", "new"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    className="chip"
+                    aria-pressed={famMode === m}
+                    onClick={() => setFamMode(m)}
+                  >
+                    {m === "existing" ? "Pick existing" : "Create new"}
+                  </button>
+                ))}
+              </div>
+              {famMode === "existing" ? (
+                <NodePicker label="Relative" value={famOther} onPick={setFamOther} />
+              ) : (
+                <>
+                  <label className="flabel">Relative&apos;s name</label>
+                  <input
+                    value={famNewName}
+                    onChange={(e) => setFamNewName(e.target.value)}
+                    placeholder="Full name"
+                    style={{ width: "100%" }}
+                  />
+                </>
+              )}
+            </div>
+          </div>
+          <div className="mt">
+            <button className="btn-primary" onClick={submitFamily}>
+              Add family member
+            </button>
+          </div>
+          {famMsg &&
+            (famMsg.ok ? (
+              <p className="mt">✅ {famMsg.text}</p>
+            ) : (
+              <div className="err">{famMsg.text}</div>
+            ))}
+
+          <h4>Add direct report</h4>
+          <div className="row wrap">
+            <div style={{ flex: 1, minWidth: 240 }}>
+              <NodePicker label="Employee" value={repEmp} onPick={setRepEmp} />
+            </div>
+            <div style={{ flex: 1, minWidth: 240 }}>
+              <NodePicker label="Manager" value={repMgr} onPick={setRepMgr} />
+            </div>
+          </div>
+          <div className="mt">
+            <button className="btn-primary" onClick={submitReport}>
+              Set reporting line
+            </button>
+          </div>
+          {repMsg &&
+            (repMsg.ok ? (
+              <p className="mt">✅ {repMsg.text}</p>
+            ) : (
+              <div className="err">{repMsg.text}</div>
+            ))}
+
+          <h4>Remove a link</h4>
+          <p className="tiny">
+            Divest a subsidiary, fix a wrong parent, remove a reporting line. Nodes stay —
+            only the relationship is deleted.
+          </p>
+          <NodePicker label="Node" value={mgrNode} onPick={loadMgrEdges} />
+          {mgrNode && (
+            <ul className="list">
+              {mgrEdges.map((e) => (
+                <li key={e.id}>
+                  <span className="badge b-type-Organization mono">{e.rel_type}</span>
+                  <span className="grow">{e.other}</span>
+                  <span className="tiny mono">{e.id.slice(0, 8)}</span>
+                  <button
+                    type="button"
+                    className="btn-sm"
+                    onClick={() => removeEdge(e.id, `${e.rel_type} → ${e.other}`)}
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {mgrNode && mgrEdges.length === 0 && !mgrMsg && (
+            <p className="empty">No links on this node.</p>
+          )}
+          {mgrMsg && <div className="err">{mgrMsg}</div>}
         </div>
       </main>
     </>

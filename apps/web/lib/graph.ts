@@ -352,7 +352,20 @@ export async function updateEdgeConfidence(
   return (rows[0]?.r != null ? cleanEdge(rows[0].r) : {}) as GraphEdge;
 }
 
-/** Force-inferred persistence for auto-ingested candidates (parity with ingestion.py). */export async function persistCandidates(
+/** Delete an edge (e.g. remove a wrong parent/subsidiary/manager link).
+ *  Nodes are never deleted implicitly — only the relationship is removed. */
+export async function deleteEdge(edgeId: string): Promise<{ deleted: string }> {
+  const rows = await runWrite(
+    `MATCH ()-[r {id: $edge_id}]->() DELETE r RETURN count(r) AS deleted`,
+    { edge_id: edgeId },
+  );
+  const deleted = Number((toPlainValue(rows[0]?.deleted) as number) ?? 0);
+  if (!deleted) throw new ApiError(404, `Edge not found: ${edgeId}`);
+  return { deleted: edgeId };
+}
+
+/** Force-inferred persistence for auto-ingested candidates (parity with ingestion.py). */
+export async function persistCandidates(
   nodes: Array<{ id?: string; type: string; name: string; aliases?: string[]; attributes?: Record<string, unknown> }>,
   edges: Array<{
     rel_type: string;
