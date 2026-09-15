@@ -352,8 +352,7 @@ export async function updateEdgeConfidence(
   return (rows[0]?.r != null ? cleanEdge(rows[0].r) : {}) as GraphEdge;
 }
 
-/** Force-inferred persistence for auto-ingested candidates (parity with ingestion.py). */
-export async function persistCandidates(
+/** Force-inferred persistence for auto-ingested candidates (parity with ingestion.py). */export async function persistCandidates(
   nodes: Array<{ id?: string; type: string; name: string; aliases?: string[]; attributes?: Record<string, unknown> }>,
   edges: Array<{
     rel_type: string;
@@ -375,4 +374,152 @@ export async function persistCandidates(
     createdEdges.push(await createEdge({ ...e, confidence: e.confidence === "verified" ? "inferred" : e.confidence }));
   }
   return { nodes: createdNodes, edges: createdEdges };
+}
+
+// ---------------------------------------------------------------------------
+// Hierarchy: nested trees (ownership / family / corporate), not flat graphs.
+// Answers "who sits where in the hierarchy" — org charts, ownership trees,
+// family lineages. Cycle-safe BFS with visited set, depth + size caps.
+// ---------------------------------------------------------------------------
+
+export type HierarchyDim = "ownership" | "family" | "corporate";
+export type HierarchyDirection = "down" | "up";
+
+export interface TreeNode {
+  node: GraphNode;
+  /** Edge from the parent (null for the root). */
+  edge: GraphEdge | null;
+  children: TreeNode[];
+  /** Family dim only: spouses attached for display, never recursed into. */
+  spouses?: GraphNode[];
+}
+
+const OWNERSHIP_RELS = ["owns", "subsidiary_of"];
+const FAMILY_RELS = ["parent_of", "child_of", "spouse_of"];
+const CORPORATE_PERSON_RELS = ["reports_to"];
+const CORPORATE_ORG_RELS = [
+  "chairman_of",
+  "founder_of",
+  "director_of",
+  "board_member_of",
+  "advisor_to",
+  "employee_of",
+];
+/** Display order for people under an organization (most senior first). */
+const ROLE_RANK: Record<string, number> = {
+  chairman_of: 0,
+  founder_of: 1,
+  director_of: 2,
+  board_member_of: 3,
+  advisor_to: 4,
+  employee_of: 5,
+};
+
+interface NeighborHit {
+  edge: GraphEdge;
+  node: GraphNode;
+}
+
+async function incidentRels(nodeId: string, rels: string[]): Promise<NeighborHit[]> {
+  const rows = await runRead(
+    `MATCH (p {id: $id})-[r]-(c) WHERE type(r) IN $rels ` +
+      `RETURN ${relProj("r")} AS edge, ${nodeProj("c")} AS neighbor LIMIT 200`,
+    { id: nodeId, rels },
+  );
+  return rows
+    .filter((r) => r.edge && typeof r.edge === "object" && r.neighbor && typeof r.neighbor === "object")
+    .map((r) => ({ edge: cleanEdge(r.edge), node: cleanNode(r.neighbor) }));
+}
+
+/** Split incident edges into parent-side / child-side / attached for one node. */
+function classify(
+  currentId: string,
+  currentLabel: string | undefined,
+  dim: HierarchyDim,
+  hits: NeighborHit[],
+): { parents: NeighborHit[]; children: NeighborHit[]; spouses: GraphNode[] } {
+  const parents: NeighborHit[] = [];
+  const children: NeighborHit[] = [];
+  const spouses: GraphNode[] = [];
+  for (const h of hits) {
+    const t = h.edge.rel_type;
+    const outgoing = h.edge.from_id === currentId;
+    if (dim === "ownership") {
+      // (parent)-[:owns]->(child); (child)-[:subsidiary_of]->(parent)
+      const isChild = (t === "owns" && outgoing) || (t === "subsidiary_of" && !outgoing);
+      (isChild ? children : parents).push(h);
+    } else if (dim === "family") {
+      if (t === "spouse_of") {
+        spouses.push(h.node);
+        continue;
+      }
+      if (t === "associated_with") {
+        // (member)-[:associated_with]->(Family): members hang below the family
+        ((!outgoing) ? children : parents).push(h);
+        continue;
+      }
+      // (parent)-[:parent_of]->(child); (child)-[:child_of]->(parent)
+      const isChild = (t === "parent_of" && outgoing) || (t === "child_of" && !outgoing);
+      (isChild ? children : parents).push(h);
+    } else {
+      // corporate
+      if (currentLabel === "Organization") {
+        if (t === "owns" && !outgoing) parents.push(h); // owner above
+        else if (t === "subsidiary_of" && outgoing) parents.push(h);
+        else children.push(h); // affiliated people below, ranked later
+      } else {
+        // Person (or other): reports_to chain
+        // (report)-[:reports_to]->(manager): outgoing = my manager (parent)
+        (outgoing ? parents : children).push(h);
+      }
+    }
+  }
+  if (dim === "corporate" && currentLabel === "Organization") {
+    children.sort(
+      (a, b) =>
+        (ROLE_RANK[a.edge.rel_type] ?? 6) - (ROLE_RANK[b.edge.rel_type] ?? 6) ||
+        (a.node.name ?? "").localeCompare(b.node.name ?? ""),
+    );
+  }
+  return { parents, children, spouses };
+}
+
+function dimRels(dim: HierarchyDim, label: string | undefined): string[] {
+  if (dim === "ownership") return OWNERSHIP_RELS;
+  if (dim === "family") return label === "Family" ? [...FAMILY_RELS, "associated_with"] : FAMILY_RELS;
+  if (label === "Organization") return [...CORPORATE_ORG_RELS, "owns", "subsidiary_of"];
+  if (label === "Family") return ["associated_with"];
+  return CORPORATE_PERSON_RELS;
+}
+
+export async function hierarchy(
+  rootId: string,
+  dim: HierarchyDim,
+  direction: HierarchyDirection = "down",
+  maxDepth = 4,
+): Promise<TreeNode> {
+  const depth = Math.max(1, Math.min(maxDepth, 6));
+  const root = await getNode(rootId);
+  if (!root) throw new ApiError(404, `Node not found: ${rootId}`);
+  const tree: TreeNode = { node: root, edge: null, children: [] };
+  const visited = new Set<string>([rootId]);
+  const queue: Array<{ tree: TreeNode; id: string; label?: string; level: number }> = [
+    { tree, id: rootId, label: root.label, level: 0 },
+  ];
+  while (queue.length > 0 && visited.size < 500) {
+    const frame = queue.shift()!;
+    if (frame.level >= depth) continue;
+    const hits = await incidentRels(frame.id, dimRels(dim, frame.label));
+    const { parents, children, spouses } = classify(frame.id, frame.label, dim, hits);
+    if (spouses.length > 0) frame.tree.spouses = spouses;
+    const next = direction === "down" ? children : parents;
+    for (const h of next.slice(0, 50)) {
+      if (visited.has(h.node.id)) continue;
+      visited.add(h.node.id);
+      const child: TreeNode = { node: h.node, edge: h.edge, children: [] };
+      frame.tree.children.push(child);
+      queue.push({ tree: child, id: h.node.id, label: h.node.label, level: frame.level + 1 });
+    }
+  }
+  return tree;
 }

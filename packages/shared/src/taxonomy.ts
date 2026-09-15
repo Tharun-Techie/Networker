@@ -35,6 +35,7 @@ export const REL_TYPES = [
   "mentor_of",
   "partner_of",
   "served_with",
+  "reports_to",
   // Education / institutional
   "studied_at",
   "alumni_of",
@@ -59,7 +60,7 @@ export function assertNodeType(value: string): asserts value is NodeType {
 export const REL_CATEGORIES: Record<string, RelType[]> = {
   family: ["parent_of", "child_of", "spouse_of", "sibling_of", "family_of", "associated_with"],
   board: ["director_of", "board_member_of", "chairman_of", "trustee_of", "served_with"],
-  employment: ["employee_of", "worked_with", "former_colleague_of"],
+  employment: ["employee_of", "worked_with", "former_colleague_of", "reports_to"],
   ownership: ["owns", "subsidiary_of", "invested_in", "founder_of"],
   education: ["studied_at", "alumni_of"],
   partnership: ["partner_of", "mentor_of", "advisor_to", "member_of"],

@@ -7,6 +7,13 @@ export interface TimelineItem {
   neighbor: GraphNode;
 }
 
+export interface TreeNode {
+  node: GraphNode;
+  edge: GraphEdge | null;
+  children: TreeNode[];
+  spouses?: GraphNode[];
+}
+
 export interface Insight {
   headline: string;
   facts: { text: string; edge_ids: string[] }[];
@@ -61,6 +68,15 @@ export const api = {
   connectors: (a: string, b: string) =>
     get<GraphResult>(`/api/graph/connectors?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`),
   timeline: (id: string) => get<TimelineItem[]>(`/api/graph/node/${id}/timeline`),
+  hierarchy: (
+    root: string,
+    dim: "ownership" | "family" | "corporate" = "ownership",
+    direction: "down" | "up" = "down",
+    depth = 4,
+  ) =>
+    get<TreeNode>(
+      `/api/graph/hierarchy?root=${encodeURIComponent(root)}&dim=${dim}&direction=${direction}&depth=${depth}`,
+    ),
   insight: (graph: GraphResult) => post<Insight>(`/api/graph/insight`, graph),
   node: (id: string) => get<GraphNode>(`/api/nodes/${id}`),
   createNode: (body: {

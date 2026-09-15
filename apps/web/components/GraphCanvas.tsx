@@ -45,6 +45,9 @@ export default function GraphCanvas({
         try {
           graph.addEdgeWithKey(e.id, e.from_id, e.to_id, {
             label: e.rel_type,
+            // Directed edge: arrow head shows parent → child (owns, reports_to…)
+            type: "arrow",
+            size: 2,
             color:
               e.confidence === "verified"
                 ? "#16a34a"
