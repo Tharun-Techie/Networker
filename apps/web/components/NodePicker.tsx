@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { api, type GraphNode, type SearchHit } from "@/lib/api";
+import { type GraphNode } from "@/lib/api";
+import Typeahead from "./Typeahead";
 
 export default function NodePicker({
   label,
@@ -12,16 +12,6 @@ export default function NodePicker({
   value: GraphNode | null;
   onPick: (n: GraphNode | null) => void;
 }) {
-  const [q, setQ] = useState("");
-  const [hits, setHits] = useState<SearchHit[]>([]);
-  const search = async () => {
-    if (!q.trim()) return;
-    try {
-      setHits(await api.search(q));
-    } catch {
-      /* ignore */
-    }
-  };
   return (
     <div>
       <label className="flabel">{label}</label>
@@ -34,40 +24,35 @@ export default function NodePicker({
           </button>
         </div>
       ) : (
-        <>
-          <div className="searchbar">
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && search()}
-              placeholder={`Search ${label.toLowerCase()}…`}
-            />
-            <button type="button" className="btn-sm" onClick={search}>
-              Find
-            </button>
-          </div>
-          {hits.length > 0 && (
-            <ul className="list">
-              {hits.map((h) => (
-                <li key={h.id}>
-                  <span className={`badge b-type-${h.label}`}>{h.label}</span>
-                  <span className="grow">{h.name}</span>
-                  <button
-                    type="button"
-                    className="btn-sm"
-                    onClick={() => {
-                      onPick({ id: h.id, name: h.name, label: h.label });
-                      setHits([]);
-                      setQ("");
-                    }}
-                  >
-                    Use
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </>
+        <Typeahead
+          placeholder={`Type to search ${label.toLowerCase()}…`}
+          fetchOptions={async (query, signal) => {
+            const res = await fetch(
+              `/api/search?q=${encodeURIComponent(query)}&limit=8`,
+              { signal },
+            );
+            if (!res.ok) throw new Error("search failed");
+            const hits = (await res.json()) as Array<{
+              id: string;
+              label: string;
+              name: string;
+              score: number;
+            }>;
+            return hits.map((h) => ({
+              id: h.id,
+              primary: h.name,
+              secondary: `match ${h.score.toFixed(2)}`,
+              badge: h.label,
+            }));
+          }}
+          onSelect={(opt) =>
+            onPick({
+              id: opt.id,
+              name: opt.primary,
+              label: opt.badge,
+            })
+          }
+        />
       )}
     </div>
   );

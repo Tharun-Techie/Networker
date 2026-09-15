@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ATTR_FIELDS, NODE_TYPES, REL_CATEGORIES, type NodeType } from "@networker/shared";
 import Nav from "@/components/Nav";
 import NodePicker from "@/components/NodePicker";
+import Typeahead from "@/components/Typeahead";
 import { api, type GraphNode } from "@/lib/api";
 
 export default function AddPage() {
@@ -22,9 +23,11 @@ export default function AddPage() {
   const [from, setFrom] = useState<GraphNode | null>(null);
   const [to, setTo] = useState<GraphNode | null>(null);
   const [rel, setRel] = useState("employee_of");
+  const [relFilter, setRelFilter] = useState("");
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [source, setSource] = useState("");
+  const [sourceTitle, setSourceTitle] = useState("");
   const [conf, setConf] = useState<"unconfirmed" | "inferred">("unconfirmed");
   const [note, setNote] = useState("");
   const [by, setBy] = useState("");
@@ -33,6 +36,14 @@ export default function AddPage() {
   const [vEdge, setVEdge] = useState("");
   const [vActor, setVActor] = useState("");
   const [vMsg, setVMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const relGroups = Object.entries(REL_CATEGORIES)
+    .map(([cat, rels]) => ({
+      cat,
+      rels: rels.filter((r) => r.includes(relFilter.trim().toLowerCase())),
+    }))
+    .filter((g) => g.rels.length > 0);
+  const relCount = relGroups.reduce((n, g) => n + g.rels.length, 0);
 
   const submitNode = async () => {
     setNMsg(null);
@@ -242,7 +253,14 @@ export default function AddPage() {
                 ✅ {evMsg.text}
                 <br />
                 <span className="mono">{evMsg.id}</span>{" "}
-                <button type="button" className="btn-sm" onClick={() => setSource(evMsg.id!)}>
+                <button
+                  type="button"
+                  className="btn-sm"
+                  onClick={() => {
+                    setSource(evMsg.id!);
+                    setSourceTitle(ev.title.trim());
+                  }}
+                >
                   Use as source ↓
                 </button>
               </p>
@@ -261,24 +279,30 @@ export default function AddPage() {
               <NodePicker label="To" value={to} onPick={setTo} />
             </div>
           </div>
-          <div className="mt">
-            <label className="flabel">Relationship type</label>
-            <select
-              value={rel}
-              onChange={(e) => setRel(e.target.value)}
-              style={{ font: "inherit", padding: 8, borderRadius: 8, width: "100%" }}
-            >
-              {Object.entries(REL_CATEGORIES).map(([cat, rels]) => (
-                <optgroup key={cat} label={cat}>
-                  {rels.map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-          </div>
+        <div className="mt">
+          <label className="flabel">Relationship type · {relCount} of 24</label>
+          <input
+            value={relFilter}
+            onChange={(e) => setRelFilter(e.target.value)}
+            placeholder="Type to filter, e.g. board…"
+            style={{ width: "100%", marginBottom: 6 }}
+          />
+          <select
+            value={rel}
+            onChange={(e) => setRel(e.target.value)}
+            style={{ font: "inherit", padding: 8, borderRadius: 8, width: "100%" }}
+          >
+            {relGroups.map(({ cat, rels }) => (
+              <optgroup key={cat} label={cat}>
+                {rels.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </div>
           <div className="row wrap mt">
             <div style={{ flex: 1, minWidth: 160 }}>
               <label className="flabel">Start date</label>
@@ -310,16 +334,58 @@ export default function AddPage() {
               </select>
             </div>
           </div>
-          <div className="mt">
-            <label className="flabel">Source (evidence ID) — required</label>
-            <input
-              value={source}
-              onChange={(e) => setSource(e.target.value)}
-              placeholder="Paste evidence ID from step 2"
-              className="mono"
-              style={{ width: "100%" }}
-            />
-          </div>
+        <div className="mt">
+          <label className="flabel">Source (evidence) — required</label>
+          <Typeahead
+            placeholder="Type to find saved evidence…"
+            fetchOptions={async (query, signal) => {
+              const res = await fetch(
+                `/api/evidence/search?q=${encodeURIComponent(query)}&limit=8`,
+                { signal },
+              );
+              if (!res.ok) throw new Error("evidence search failed");
+              const items = (await res.json()) as Array<{
+                id: string;
+                title: string;
+                page_ref: string | null;
+              }>;
+              return items.map((d) => ({
+                id: d.id,
+                primary: d.title,
+                secondary: d.page_ref ?? d.id.slice(0, 8),
+              }));
+            }}
+            onSelect={(opt) => {
+              setSource(opt.id);
+              setSourceTitle(opt.primary);
+            }}
+          />
+          {sourceTitle && (
+            <p className="tiny mt">
+              Selected: <strong>{sourceTitle}</strong>{" "}
+              <button
+                type="button"
+                className="btn-sm btn-ghost"
+                onClick={() => {
+                  setSource("");
+                  setSourceTitle("");
+                }}
+              >
+                clear
+              </button>
+            </p>
+          )}
+          <input
+            value={source}
+            onChange={(e) => {
+              setSource(e.target.value);
+              setSourceTitle("");
+            }}
+            placeholder="…or paste an evidence ID directly"
+            className="mono"
+            style={{ width: "100%", marginTop: 6 }}
+          />
+        </div>
           <div className="row wrap mt">
             <div style={{ flex: 1, minWidth: 220 }}>
               <label className="flabel">Note (optional)</label>
