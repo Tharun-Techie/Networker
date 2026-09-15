@@ -70,6 +70,13 @@ const NODES: SeedNode[] = [
     name: "Tata Capital",
     attributes: { industry: "Financial Services", location: "Mumbai" },
   },
+  {
+    id: "org-jlr",
+    label: "Organization",
+    name: "Jaguar Land Rover",
+    aliases: ["JLR"],
+    attributes: { industry: "Automotive", location: "Coventry" },
+  },
 ];
 
 const EDGES: SeedEdge[] = [
@@ -83,6 +90,8 @@ const EDGES: SeedEdge[] = [
   { id: "edge-sons-steel", rel: "owns", from: "org-tata-sons", to: "org-tata-steel" },
   { id: "edge-ratan-family", rel: "associated_with", from: "person-ratan-tata", to: "family-tata" },
   { id: "edge-ratan-sons", rel: "chairman_of", from: "person-ratan-tata", to: "org-tata-sons", start: "1991-01-01", end: "2012-12-28", note: "Former chairman" },
+  // Second ownership level (wholly owned subsidiary of Tata Motors)
+  { id: "edge-motors-jlr", rel: "owns", from: "org-tata-motors", to: "org-jlr" },
 ];
 
 async function main() {
@@ -103,7 +112,7 @@ async function main() {
   console.log(`nodes: ${NODES.length}`);
   for (const e of EDGES) {
     await runWrite(
-      `MATCH (a {id: $from}), (b {id: $to}) MERGE (a)-[r:\`${e.rel}\` {id: $eid}] ` +
+      `MATCH (a {id: $from}), (b {id: $to}) MERGE (a)-[r:\`${e.rel}\` {id: $eid}]->(b) ` +
         `SET r.start_date = $start, r.end_date = $end, r.source = 'seed-demo', ` +
         `r.confidence = 'verified', r.note = $note`,
       {
