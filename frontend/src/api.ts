@@ -68,7 +68,11 @@ export interface Insight {
   citations: string[];
 }
 
-const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+// Same-origin by default: the Vite dev server proxies /api, /graph,
+// /search, /health to the backend (see vite.config.ts). This keeps the UI
+// working through proxied preview URLs where the browser cannot reach
+// backend ports directly. Set VITE_API_URL only to bypass the proxy.
+const BASE = import.meta.env.VITE_API_URL ?? "";
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);

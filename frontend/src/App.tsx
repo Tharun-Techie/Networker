@@ -1,4 +1,5 @@
 import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom";
+import Add from "./pages/Add";
 import Explore from "./pages/Explore";
 import OrgProfile from "./pages/OrgProfile";
 import PersonProfile from "./pages/PersonProfile";
@@ -19,12 +20,16 @@ export default function App() {
           <NavLink to="/search" className={({ isActive }) => (isActive ? "active" : "")}>
             Search / Query
           </NavLink>
+          <NavLink to="/add" className={({ isActive }) => (isActive ? "active" : "")}>
+            + Add
+          </NavLink>
         </div>
       </nav>
       <main className="nw-main">
         <Routes>
           <Route path="/" element={<Explore />} />
           <Route path="/search" element={<SearchPage />} />
+          <Route path="/add" element={<Add />} />
           <Route path="/person/:id" element={<PersonProfile />} />
           <Route path="/org/:id" element={<OrgProfile />} />
         </Routes>
