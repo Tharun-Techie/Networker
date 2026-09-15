@@ -23,4 +23,4 @@ async def get_node(node_id: str):
         raise HTTPException(503, str(exc))
     if not rows:
         raise HTTPException(404, "Node not found")
-    return rows[0]["n"]
+    return graph_service._clean_node(rows[0]["n"])

@@ -16,6 +16,26 @@ def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _clean_node(n: dict) -> dict:
+    """Neo4j can't store maps: attributes live as a JSON string property
+    (attributes_json) and are decoded back to an `attributes` object here,
+    so every read path returns the same shape the API promises."""
+    if not isinstance(n, dict):
+        return n
+    n = dict(n)
+    raw = n.pop("attributes_json", None)
+    if "attributes" not in n:
+        if raw:
+            try:
+                import json
+                n["attributes"] = json.loads(raw) if isinstance(raw, str) else {}
+            except Exception:
+                n["attributes"] = {}
+        else:
+            n["attributes"] = {}
+    return n
+
+
 def _validate_rel(rel_type: str) -> str:
     if rel_type not in ALLOWED_RELS:
         raise ValueError(f"Unknown relationship type: {rel_type}")
@@ -23,10 +43,11 @@ def _validate_rel(rel_type: str) -> str:
 
 
 async def create_node(data: NodeCreate, run: RunFn) -> dict:
+    import json
     now = _utcnow()
     query = (
         "CREATE (n:`%s` {id: $id, name: $name, aliases: $aliases, "
-        "aliases_text: $aliases_text, attributes: $attributes, "
+        "aliases_text: $aliases_text, attributes_json: $attributes_json, "
         "created_at: $now, updated_at: $now}) RETURN n" % data.type.value
     )
     rows = await run(
@@ -36,11 +57,11 @@ async def create_node(data: NodeCreate, run: RunFn) -> dict:
             "name": data.name,
             "aliases": data.aliases,
             "aliases_text": " ".join([data.name, *data.aliases]),
-            "attributes": data.attributes,
+            "attributes_json": json.dumps(data.attributes),
             "now": now,
         },
     )
-    return rows[0]["n"] if rows else {"id": data.id}
+    return _clean_node(rows[0]["n"]) if rows else {"id": data.id}
 
 
 async def create_edge(data: EdgeCreate, run: RunFn) -> dict:
@@ -152,7 +173,7 @@ async def shared_employment(org_a_id: str, org_b_id: str, run: RunFn) -> dict:
         for key in ("person", "a", "b"):
             n = row.get(key)
             if isinstance(n, dict) and n.get("id"):
-                (people if key == "person" else orgs)[n["id"]] = n
+                (people if key == "person" else orgs)[n["id"]] = _clean_node(n)
         for key in ("r1", "r2"):
             r = row.get(key)
             if isinstance(r, dict) and r.get("id", r.get("source")):
@@ -180,7 +201,7 @@ async def connectors(org_a_id: str, org_b_id: str, run: RunFn) -> dict:
         for key in ("a", "p", "b"):
             n = row.get(key)
             if isinstance(n, dict) and n.get("id"):
-                nodes[n["id"]] = n
+                nodes[n["id"]] = _clean_node(n)
         for key in ("r1", "r2"):
             r = row.get(key)
             if isinstance(r, dict) and r.get("id", r.get("source")):
@@ -209,9 +230,9 @@ async def board_overlap(org_ids: list[str], run: RunFn) -> dict:
     for row in rows:
         p, o, r = row.get("person"), row.get("o"), row.get("r")
         if isinstance(p, dict) and p.get("id"):
-            people[p["id"]] = p
+            people[p["id"]] = _clean_node(p)
         if isinstance(o, dict) and o.get("id"):
-            orgs[o["id"]] = o
+            orgs[o["id"]] = _clean_node(o)
         if isinstance(r, dict) and r.get("id", r.get("source")):
             edges[r.get("id", str(len(edges)))] = r
     return {"nodes": [*orgs.values(), *people.values()],
@@ -235,7 +256,7 @@ async def timeline(node_id: str, run: RunFn) -> list[dict]:
         edge, neighbor = row.get("edge"), row.get("neighbor")
         if isinstance(edge, dict):
             out.append({"edge": edge,
-                        "neighbor": neighbor if isinstance(neighbor, dict) else {}})
+                        "neighbor": _clean_node(neighbor) if isinstance(neighbor, dict) else {}})
     # NULL start_dates sort first in some stores — push dateless edges last.
     out.sort(key=lambda item: (item["edge"].get("start_date") is None,
                                item["edge"].get("start_date") or ""))
@@ -261,7 +282,7 @@ def _rows_to_graph(rows: list[dict]) -> dict:
         for key in ("src", "n"):
             n = row.get(key)
             if isinstance(n, dict) and n.get("id"):
-                nodes[n["id"]] = n
+                nodes[n["id"]] = _clean_node(n)
         r = row.get("r")
         rels = r if isinstance(r, list) else ([r] if r else [])
         for rel in rels:

@@ -42,7 +42,8 @@ async def search_nodes(q: str, limit: int = 20) -> list[dict[str, Any]]:
         )
         out = []
         for r in rows:
-            n = r.get("node", {})
+            from app.services.graph_service import _clean_node
+            n = _clean_node(r.get("node", {}))
             out.append({"id": n.get("id"), "label": "?",
                         "name": n.get("name"), "score": r.get("score", 1.0)})
         return out
