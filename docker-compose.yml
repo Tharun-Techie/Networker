@@ -111,6 +111,8 @@ services:
     build: ./frontend
     ports:
       - "${FRONTEND_PORT:-5173}:5173"
+    environment:
+      BACKEND_URL: http://backend:8000
     volumes:
       - ./frontend:/app
       - /app/node_modules
