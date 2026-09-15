@@ -1,13 +1,21 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import EvidencePanel from "@/components/EvidencePanel";
 import FilterPanel, { NODE_TYPES } from "@/components/FilterPanel";
 import GraphCanvas from "@/components/GraphCanvas";
+import HierarchyTree from "@/components/HierarchyTree";
 import InsightPanel from "@/components/InsightPanel";
 import Nav from "@/components/Nav";
 import Typeahead from "@/components/Typeahead";
-import { api, type GraphEdge, type GraphResult, type Insight, type SearchHit } from "@/lib/api";
+import {
+  api,
+  type GraphEdge,
+  type GraphResult,
+  type Insight,
+  type SearchHit,
+  type TreeNode,
+} from "@/lib/api";
 
 function mergeGraph(a: GraphResult, b: GraphResult): GraphResult {
   const nodes = new Map(a.nodes.map((n) => [n.id, n]));
@@ -29,6 +37,11 @@ export default function ExplorePage() {
   const [until, setUntil] = useState("");
   const [insight, setInsight] = useState<Insight | null>(null);
   const [err, setErr] = useState("");
+  const [view, setView] = useState<"graph" | "tree">("graph");
+  const [treeDim, setTreeDim] = useState<"ownership" | "family" | "corporate">("ownership");
+  const [treeRoot, setTreeRoot] = useState("");
+  const [tree, setTree] = useState<TreeNode | null>(null);
+  const [treeLoading, setTreeLoading] = useState(false);
 
   const visible = useMemo(() => {
     const keep = new Set(
@@ -68,6 +81,21 @@ export default function ExplorePage() {
       setErr(e instanceof Error ? e.message : "Insight failed");
     }
   };
+
+  // Hierarchy tree for the chosen root (defaults to the first visible node).
+  const effectiveRoot = treeRoot || visible.nodes[0]?.id || "";
+  useEffect(() => {
+    if (view !== "tree" || !effectiveRoot) {
+      setTree(null);
+      return;
+    }
+    setTreeLoading(true);
+    api
+      .hierarchy(effectiveRoot, treeDim, "down")
+      .then(setTree)
+      .catch((e) => setErr(e instanceof Error ? e.message : "Hierarchy failed"))
+      .finally(() => setTreeLoading(false));
+  }, [view, effectiveRoot, treeDim]);
 
   return (
     <>
@@ -137,11 +165,29 @@ export default function ExplorePage() {
             <div className="card">
               <div className="row wrap">
                 <h3 className="grow" style={{ margin: 0 }}>
-                  Graph{" "}
+                  {view === "graph" ? "Graph" : "Hierarchy"}{" "}
                   <span className="tiny">
                     {visible.nodes.length} nodes · {visible.edges.length} edges
                   </span>
                 </h3>
+                <div className="row">
+                  <button
+                    type="button"
+                    className="chip"
+                    aria-pressed={view === "graph"}
+                    onClick={() => setView("graph")}
+                  >
+                    ⬡ Graph
+                  </button>
+                  <button
+                    type="button"
+                    className="chip"
+                    aria-pressed={view === "tree"}
+                    onClick={() => setView("tree")}
+                  >
+                    🌳 Tree
+                  </button>
+                </div>
                 <button
                   className="btn-primary btn-sm"
                   onClick={doInsight}
@@ -150,18 +196,68 @@ export default function ExplorePage() {
                   ✦ Network insight
                 </button>
               </div>
-              <div className="mt">
-                <GraphCanvas nodes={visible.nodes} edges={visible.edges} onSelectEdge={setEdge} />
-              </div>
-              {visible.nodes.length > 0 && (
+              {view === "graph" ? (
+                <>
+                  <div className="mt">
+                    <GraphCanvas
+                      nodes={visible.nodes}
+                      edges={visible.edges}
+                      onSelectEdge={setEdge}
+                    />
+                  </div>
+                  {visible.nodes.length > 0 && (
+                    <div className="mt">
+                      <span className="tiny">Expand another degree from: </span>
+                      <div className="row wrap mt">
+                        {visible.nodes.slice(0, 20).map((n) => (
+                          <button key={n.id} className="chip" onClick={() => doExpand(n.id, true)}>
+                            {n.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
                 <div className="mt">
-                  <span className="tiny">Expand another degree from: </span>
-                  <div className="row wrap mt">
-                    {visible.nodes.slice(0, 20).map((n) => (
-                      <button key={n.id} className="chip" onClick={() => doExpand(n.id, true)}>
-                        {n.name}
+                  <div className="row wrap">
+                    <label className="flabel">Root</label>
+                    <select
+                      value={effectiveRoot}
+                      onChange={(e) => setTreeRoot(e.target.value)}
+                      style={{ font: "inherit", padding: 6, borderRadius: 8, minWidth: 200 }}
+                    >
+                      {visible.nodes.map((n) => (
+                        <option key={n.id} value={n.id}>
+                          {n.name} ({n.label ?? "?"})
+                        </option>
+                      ))}
+                    </select>
+                    {(["ownership", "family", "corporate"] as const).map((d) => (
+                      <button
+                        key={d}
+                        type="button"
+                        className="chip"
+                        aria-pressed={treeDim === d}
+                        onClick={() => setTreeDim(d)}
+                      >
+                        {d}
                       </button>
                     ))}
+                  </div>
+                  <div className="mt">
+                    {treeLoading ? (
+                      <p className="empty">Loading hierarchy…</p>
+                    ) : !tree ? (
+                      <p className="empty">Expand a node first, then inspect its hierarchy here.</p>
+                    ) : tree.children.length === 0 && (tree.spouses ?? []).length === 0 ? (
+                      <p className="empty">
+                        No {treeDim} hierarchy under {tree.node.name} — try another root or
+                        dimension.
+                      </p>
+                    ) : (
+                      <HierarchyTree tree={tree} />
+                    )}
                   </div>
                 </div>
               )}

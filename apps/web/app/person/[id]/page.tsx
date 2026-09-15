@@ -4,9 +4,10 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { REL_CATEGORIES } from "@networker/shared";
 import GraphCanvas from "@/components/GraphCanvas";
+import HierarchyTree from "@/components/HierarchyTree";
 import InsightPanel from "@/components/InsightPanel";
 import Nav from "@/components/Nav";
-import { api, type GraphResult, type Insight, type TimelineItem } from "@/lib/api";
+import { api, type GraphResult, type Insight, type TimelineItem, type TreeNode } from "@/lib/api";
 
 const CONF_CLASS: Record<string, string> = {
   verified: "b-verified",
@@ -35,11 +36,17 @@ export default function PersonPage() {
   const [graph, setGraph] = useState<GraphResult>({ nodes: [], edges: [] });
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
   const [insight, setInsight] = useState<Insight | null>(null);
+  const [family, setFamily] = useState<TreeNode | null>(null);
+  const [reportsUp, setReportsUp] = useState<TreeNode | null>(null);
+  const [reportsDown, setReportsDown] = useState<TreeNode | null>(null);
 
   useEffect(() => {
     if (!id) return;
     api.expand(id, 1).then(setGraph).catch(() => {});
     api.timeline(id).then(setTimeline).catch(() => {});
+    api.hierarchy(id, "family", "down").then(setFamily).catch(() => {});
+    api.hierarchy(id, "corporate", "up", 6).then(setReportsUp).catch(() => {});
+    api.hierarchy(id, "corporate", "down").then(setReportsDown).catch(() => {});
   }, [id]);
 
   const me = graph.nodes.find((n) => n.id === id);
@@ -68,6 +75,37 @@ export default function PersonPage() {
         </div>
 
         <div className="card">
+          <h3>Family tree</h3>
+          {!family ? (
+            <p className="empty">Loading…</p>
+          ) : family.children.length === 0 && (family.spouses ?? []).length === 0 ? (
+            <p className="empty">No family relationships recorded yet.</p>
+          ) : (
+            <HierarchyTree tree={family} />
+          )}
+        </div>
+
+        <div className="card">
+          <h3>Reporting line</h3>
+          <h4>Manager chain</h4>
+          {!reportsUp ? (
+            <p className="empty">Loading…</p>
+          ) : reportsUp.children.length === 0 ? (
+            <p className="empty">No manager recorded.</p>
+          ) : (
+            <HierarchyTree tree={reportsUp} />
+          )}
+          <h4>Direct reports</h4>
+          {!reportsDown ? (
+            <p className="empty">Loading…</p>
+          ) : reportsDown.children.length === 0 ? (
+            <p className="empty">No direct reports recorded.</p>
+          ) : (
+            <HierarchyTree tree={reportsDown} />
+          )}
+        </div>
+
+        <div className="card">
           <h3>Career timeline</h3>
           {timeline.length === 0 ? (
             <p className="empty">No dated relationships yet.</p>
@@ -91,8 +129,8 @@ export default function PersonPage() {
           )}
         </div>
 
-        <div className="card">
-          <h3>Connections by category</h3>
+      <div className="card">
+        <h3>Connections by category</h3>
           {Object.keys(grouped).length === 0 && <p className="empty">No connections found.</p>}
           {Object.entries(grouped).map(([cat, items]) => (
             <div key={cat}>
