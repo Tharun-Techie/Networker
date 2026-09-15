@@ -3,6 +3,13 @@ import Graph from "graphology";
 import Sigma from "sigma";
 import type { GraphEdge, GraphNode } from "../api";
 
+const TYPE_COLORS: Record<string, string> = {
+  Person: "#2563eb",
+  Organization: "#7c3aed",
+  Family: "#db2777",
+  Institution: "#059669",
+};
+
 /** Shared Sigma.js canvas. Positions nodes on a circle (replace with
  *  force layout e.g. graphology-layout-forceatlas2 once data is real). */
 export default function GraphCanvas({
@@ -29,7 +36,7 @@ export default function GraphCanvas({
           x: Math.cos(angle) * 10,
           y: Math.sin(angle) * 10,
           size: 8,
-          color: "#2563eb",
+          color: (n.label && TYPE_COLORS[n.label]) || "#2563eb",
         });
     });
     edges.forEach((e) => {
@@ -52,5 +59,17 @@ export default function GraphCanvas({
     return () => renderer.kill();
   }, [nodes, edges, onSelectEdge]);
 
-  return <div ref={ref} style={{ width: "100%", height: 480, border: "1px solid #e5e7eb" }} />;
+  return (
+    <div className="graph-wrap">
+      <div ref={ref} className="graph-canvas" />
+      <div className="graph-legend">
+        {Object.entries(TYPE_COLORS).map(([t, c]) => (
+          <span key={t}>
+            <span className="dot" style={{ background: c }} />
+            {t}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
 }
