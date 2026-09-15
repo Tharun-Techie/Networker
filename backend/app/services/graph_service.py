@@ -124,6 +124,124 @@ async def common_connections(a: str, b: str, run: RunFn) -> dict:
     return {"nodes": [r["node"] for r in rows], "edges": []}
 
 
+# Concept §12: the killer query engine. All helpers take an injectable `run`
+# so unit tests cover the Cypher construction without a live Neo4j.
+
+# Edges that count as "having worked at / served" an organization.
+WORK_REL_TYPES = ("employee_of", "director_of", "board_member_of",
+                  "chairman_of", "founder_of", "advisor_to")
+BOARD_REL_TYPES = ("director_of", "board_member_of", "chairman_of", "trustee_of")
+
+
+async def shared_employment(org_a_id: str, org_b_id: str, run: RunFn) -> dict:
+    """People who have worked at / served BOTH organizations.
+
+    Answers: "Which people have worked at both TCS and Infosys?"
+    """
+    query = """
+    MATCH (p:Person)-[r1]->(a {id: $a}), (p)-[r2]->(b {id: $b})
+    WHERE type(r1) IN $work_rels AND type(r2) IN $work_rels
+    RETURN p AS person, r1, r2, a, b
+    """
+    rows = await run(query, {"a": org_a_id, "b": org_b_id,
+                             "work_rels": list(WORK_REL_TYPES)})
+    people: dict[str, dict] = {}
+    edges: dict[str, dict] = {}
+    orgs: dict[str, dict] = {}
+    for row in rows:
+        for key in ("person", "a", "b"):
+            n = row.get(key)
+            if isinstance(n, dict) and n.get("id"):
+                (people if key == "person" else orgs)[n["id"]] = n
+        for key in ("r1", "r2"):
+            r = row.get(key)
+            if isinstance(r, dict) and r.get("id", r.get("source")):
+                edges[r.get("id", str(len(edges)))] = r
+    return {"nodes": [*orgs.values(), *people.values()],
+            "edges": list(edges.values())}
+
+
+async def connectors(org_a_id: str, org_b_id: str, run: RunFn) -> dict:
+    """People who connect Company A and Company B (1 hop to each side).
+
+    Answers: "Show people who connect Company A and Company B."
+    Unlike common_connections, this also returns the connecting edges so the
+    UI can render the A — person — B bridge with evidence.
+    """
+    query = """
+    MATCH (a {id: $a})-[r1]-(p:Person)-[r2]-(b {id: $b})
+    WHERE a <> b
+    RETURN a, r1, p, r2, b LIMIT 200
+    """
+    rows = await run(query, {"a": org_a_id, "b": org_b_id})
+    nodes: dict[str, dict] = {}
+    edges: dict[str, dict] = {}
+    for row in rows:
+        for key in ("a", "p", "b"):
+            n = row.get(key)
+            if isinstance(n, dict) and n.get("id"):
+                nodes[n["id"]] = n
+        for key in ("r1", "r2"):
+            r = row.get(key)
+            if isinstance(r, dict) and r.get("id", r.get("source")):
+                edges[r.get("id", str(len(edges)))] = r
+    return {"nodes": list(nodes.values()), "edges": list(edges.values())}
+
+
+async def board_overlap(org_ids: list[str], run: RunFn) -> dict:
+    """Board members serving across the given organizations.
+
+    Answers: "Which directors connect these three companies?" Powers the
+    Network Intelligence panel ("board overlap with X and Y").
+    """
+    if not org_ids:
+        raise ValueError("org_ids must not be empty")
+    query = """
+    MATCH (p:Person)-[r]->(o)
+    WHERE o.id IN $org_ids AND type(r) IN $board_rels
+    RETURN p AS person, r, o LIMIT 500
+    """
+    rows = await run(query, {"org_ids": list(org_ids),
+                             "board_rels": list(BOARD_REL_TYPES)})
+    people: dict[str, dict] = {}
+    orgs: dict[str, dict] = {}
+    edges: dict[str, dict] = {}
+    for row in rows:
+        p, o, r = row.get("person"), row.get("o"), row.get("r")
+        if isinstance(p, dict) and p.get("id"):
+            people[p["id"]] = p
+        if isinstance(o, dict) and o.get("id"):
+            orgs[o["id"]] = o
+        if isinstance(r, dict) and r.get("id", r.get("source")):
+            edges[r.get("id", str(len(edges)))] = r
+    return {"nodes": [*orgs.values(), *people.values()],
+            "edges": list(edges.values())}
+
+
+async def timeline(node_id: str, run: RunFn) -> list[dict]:
+    """Career/relationship timeline for a node, oldest first.
+
+    Concept §8: edges ordered by start_date (NULLs last = ongoing/unknown).
+    Returns [{edge, neighbor}] so the UI can render 1987 → joined X → ...
+    """
+    query = """
+    MATCH (n {id: $node_id})-[r]-(m)
+    RETURN r AS edge, m AS neighbor
+    ORDER BY r.start_date ASC
+    """
+    rows = await run(query, {"node_id": node_id})
+    out = []
+    for row in rows:
+        edge, neighbor = row.get("edge"), row.get("neighbor")
+        if isinstance(edge, dict):
+            out.append({"edge": edge,
+                        "neighbor": neighbor if isinstance(neighbor, dict) else {}})
+    # NULL start_dates sort first in some stores — push dateless edges last.
+    out.sort(key=lambda item: (item["edge"].get("start_date") is None,
+                               item["edge"].get("start_date") or ""))
+    return out
+
+
 async def update_edge_confidence(edge_id: str, confidence: Confidence, actor: str, run: RunFn) -> dict:
     if confidence == Confidence.VERIFIED and not actor:
         raise ValueError("Promoting to verified requires a human actor")

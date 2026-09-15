@@ -27,23 +27,64 @@ class Confidence(str, Enum):
 
 
 class RelType(str, Enum):
+    # Corporate
     EMPLOYEE_OF = "employee_of"
     DIRECTOR_OF = "director_of"
     BOARD_MEMBER_OF = "board_member_of"
+    CHAIRMAN_OF = "chairman_of"
     FOUNDER_OF = "founder_of"
+    OWNER_OF = "owns"  # COMPANY -owns-> COMPANY (value kept for back-compat)
+    SUBSIDIARY_OF = "subsidiary_of"
+    INVESTED_IN = "invested_in"
     ADVISOR_TO = "advisor_to"
+    # Family
     PARENT_OF = "parent_of"
     CHILD_OF = "child_of"
     SPOUSE_OF = "spouse_of"
     SIBLING_OF = "sibling_of"
-    STUDIED_AT = "studied_at"
-    OWNS = "owns"
-    INVESTED_IN = "invested_in"
+    FAMILY_OF = "family_of"  # PERSON -family_of-> PERSON (generic kinship)
+    ASSOCIATED_WITH = "associated_with"  # PERSON -associated_with-> FAMILY
+    # Professional
+    WORKED_WITH = "worked_with"
+    FORMER_COLLEAGUE_OF = "former_colleague_of"
+    MENTOR_OF = "mentor_of"
     PARTNER_OF = "partner_of"
+    SERVED_WITH = "served_with"  # co-tenure (e.g. same board/term)
+    # Education / institutional
+    STUDIED_AT = "studied_at"
+    ALUMNI_OF = "alumni_of"
+    MEMBER_OF = "member_of"
+    TRUSTEE_OF = "trustee_of"
+
+    # Back-compat alias: RelType.OWNS == RelType.OWNER_OF == "owns".
+    OWNS = "owns"
 
 
 ALLOWED_LABELS = {t.value for t in NodeType}
 ALLOWED_RELS = {t.value for t in RelType}
+
+# Relationship categories for the filter panel / query UI.
+# Concept §11: strict taxonomy so the graph stays queryable.
+REL_CATEGORIES: dict[str, list[str]] = {
+    "family": [RelType.PARENT_OF.value, RelType.CHILD_OF.value,
+               RelType.SPOUSE_OF.value, RelType.SIBLING_OF.value,
+               RelType.FAMILY_OF.value, RelType.ASSOCIATED_WITH.value],
+    "board": [RelType.DIRECTOR_OF.value, RelType.BOARD_MEMBER_OF.value,
+              RelType.CHAIRMAN_OF.value, RelType.TRUSTEE_OF.value,
+              RelType.SERVED_WITH.value],
+    "employment": [RelType.EMPLOYEE_OF.value, RelType.WORKED_WITH.value,
+                   RelType.FORMER_COLLEAGUE_OF.value],
+    "ownership": [RelType.OWNER_OF.value, RelType.SUBSIDIARY_OF.value,
+                  RelType.INVESTED_IN.value, RelType.FOUNDER_OF.value],
+    "education": [RelType.STUDIED_AT.value, RelType.ALUMNI_OF.value],
+    "partnership": [RelType.PARTNER_OF.value, RelType.MENTOR_OF.value,
+                    RelType.ADVISOR_TO.value, RelType.MEMBER_OF.value],
+}
+
+# Documented attribute facets (stored in node.attributes, filterable).
+# Concept §3/§7: profession, designation, industry, location, family.
+ATTRIBUTE_FACETS = ("profession", "designation", "industry", "location",
+                    "family", "kind")
 
 
 class NodeBase(BaseModel):
