@@ -87,6 +87,16 @@ export const api = {
     page_ref?: string | null;
     added_by?: string | null;
   }) => post<{ id: string } & Record<string, unknown>>(`/api/evidence`, body),
+  searchEvidence: (q: string, limit = 10) =>
+    get<
+      Array<{
+        id: string;
+        title: string;
+        source_url: string | null;
+        page_ref: string | null;
+        created_at: string;
+      }>
+    >(`/api/evidence/search?q=${encodeURIComponent(q)}&limit=${limit}`),
   setConfidence: (edgeId: string, confidence: string, actor = "") =>
     req<GraphEdge>(
       `/api/edges/${edgeId}/confidence?confidence=${confidence}&actor=${encodeURIComponent(actor)}`,

@@ -4,13 +4,15 @@ import { useState } from "react";
 import Link from "next/link";
 import GraphCanvas from "@/components/GraphCanvas";
 import Nav from "@/components/Nav";
-import { api, type GraphResult, type SearchHit } from "@/lib/api";
+import NodePicker from "@/components/NodePicker";
+import Typeahead from "@/components/Typeahead";
+import { api, type GraphNode, type GraphResult, type SearchHit } from "@/lib/api";
 
 export default function SearchPage() {
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
-  const [a, setA] = useState("");
-  const [b, setB] = useState("");
+  const [nodeA, setNodeA] = useState<GraphNode | null>(null);
+  const [nodeB, setNodeB] = useState<GraphNode | null>(null);
   const [label, setLabel] = useState("");
   const [result, setResult] = useState<GraphResult>({ nodes: [], edges: [] });
 
@@ -22,6 +24,8 @@ export default function SearchPage() {
       })
       .catch(() => {});
 
+  const pairReady = nodeA && nodeB;
+
   return (
     <>
       <Nav />
@@ -30,12 +34,28 @@ export default function SearchPage() {
         <p className="subtle">Fuzzy name search, then relationship queries between any two nodes.</p>
 
         <div className="card">
-          <div className="searchbar">
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && api.search(q).then(setHits).catch(() => {})}
-              placeholder="Fuzzy name search…"
+          <div className="row">
+            <Typeahead
+              placeholder="Type a name for full results…"
+              fetchOptions={async (query, signal) => {
+                const res = await fetch(
+                  `/api/search?q=${encodeURIComponent(query)}&limit=8`,
+                  { signal },
+                );
+                if (!res.ok) throw new Error("search failed");
+                const items = (await res.json()) as SearchHit[];
+                return items.map((h) => ({
+                  id: h.id,
+                  primary: h.name,
+                  secondary: `match ${h.score.toFixed(2)}`,
+                  badge: h.label,
+                }));
+              }}
+              onQueryChange={setQ}
+              onSelect={(opt) => {
+                setQ(opt.primary);
+                api.search(opt.primary).then(setHits).catch(() => {});
+              }}
             />
             <button
               className="btn-primary"
@@ -65,26 +85,45 @@ export default function SearchPage() {
         <div className="card">
           <h3>Relationship queries</h3>
           <p className="tiny">
-            Paste two node ids (tip: search above, ids appear in Explore). Example seed ids:{" "}
-            <span className="mono">org-tata-sons</span>, <span className="mono">org-tata-motors</span>
-            , <span className="mono">org-tcs</span>, <span className="mono">org-tata-capital</span>
+            Pick two nodes by name — no IDs needed. Example:{" "}
+            <span className="mono">Tata Motors</span> + <span className="mono">TCS</span>
           </p>
           <div className="row wrap">
-            <input value={a} onChange={(e) => setA(e.target.value)} placeholder="node A id" />
-            <input value={b} onChange={(e) => setB(e.target.value)} placeholder="node B id" />
+            <div style={{ flex: 1, minWidth: 240 }}>
+              <NodePicker label="Node A" value={nodeA} onPick={setNodeA} />
+            </div>
+            <div style={{ flex: 1, minWidth: 240 }}>
+              <NodePicker label="Node B" value={nodeB} onPick={setNodeB} />
+            </div>
           </div>
           <div className="row wrap mt">
-            <button onClick={() => run(api.common(a, b), "Common connections")}>
+            <button
+              disabled={!pairReady}
+              onClick={() => pairReady && run(api.common(nodeA!.id, nodeB!.id), "Common connections")}
+            >
               Common connections
             </button>
-            <button onClick={() => run(api.path(a, b), "Shortest path")}>Shortest path</button>
+            <button
+              disabled={!pairReady}
+              onClick={() => pairReady && run(api.path(nodeA!.id, nodeB!.id), "Shortest path")}
+            >
+              Shortest path
+            </button>
             <button
               className="btn-primary"
-              onClick={() => run(api.connectors(a, b), "People connecting A and B")}
+              disabled={!pairReady}
+              onClick={() =>
+                pairReady && run(api.connectors(nodeA!.id, nodeB!.id), "People connecting A and B")
+              }
             >
               Who connects A and B?
             </button>
-            <button onClick={() => run(api.sharedEmployment(a, b), "Worked at both")}>
+            <button
+              disabled={!pairReady}
+              onClick={() =>
+                pairReady && run(api.sharedEmployment(nodeA!.id, nodeB!.id), "Worked at both")
+              }
+            >
               Worked at both (orgs)
             </button>
           </div>

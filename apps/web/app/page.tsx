@@ -6,6 +6,7 @@ import FilterPanel, { NODE_TYPES } from "@/components/FilterPanel";
 import GraphCanvas from "@/components/GraphCanvas";
 import InsightPanel from "@/components/InsightPanel";
 import Nav from "@/components/Nav";
+import Typeahead from "@/components/Typeahead";
 import { api, type GraphEdge, type GraphResult, type Insight, type SearchHit } from "@/lib/api";
 
 function mergeGraph(a: GraphResult, b: GraphResult): GraphResult {
@@ -76,12 +77,25 @@ export default function ExplorePage() {
         <p className="subtle">Search → expand → investigate. The graph is the interface.</p>
 
         <div className="card">
-          <div className="searchbar">
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && doSearch()}
-              placeholder="Search people, companies, families…"
+          <div className="row">
+            <Typeahead
+              placeholder="Type to search people, companies, families…"
+              fetchOptions={async (query, signal) => {
+                const res = await fetch(
+                  `/api/search?q=${encodeURIComponent(query)}&limit=8`,
+                  { signal },
+                );
+                if (!res.ok) throw new Error("search failed");
+                const hits = (await res.json()) as SearchHit[];
+                return hits.map((h) => ({
+                  id: h.id,
+                  primary: h.name,
+                  secondary: `match ${h.score.toFixed(2)}`,
+                  badge: h.label,
+                }));
+              }}
+              onQueryChange={setQ}
+              onSelect={(opt) => doExpand(opt.id, false)}
             />
             <button className="btn-primary" onClick={doSearch}>
               Search
