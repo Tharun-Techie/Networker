@@ -133,25 +133,15 @@ export default function GraphCanvas({
       nodeProgramClasses: { image: getNodeImageProgram() },
     });
 
+    // Sigma normalizes node positions into a [0,1]² square every frame and
+    // the default camera (center 0.5,0.5, ratio 1) frames it exactly — so
+    // "fit" is just a reset to default. (Manual bbox math is wrong here:
+    // camera x/y/ratio live in normalized space, not graph units.)
+    // Ratio 1.15 adds breathing room for large icons and labels.
     const fit = () => {
       if (graph.order === 0) return;
-      let xMin = Infinity;
-      let xMax = -Infinity;
-      let yMin = Infinity;
-      let yMax = -Infinity;
-      graph.forEachNode((n, a) => {
-        xMin = Math.min(xMin, a.x);
-        xMax = Math.max(xMax, a.x);
-        yMin = Math.min(yMin, a.y);
-        yMax = Math.max(yMax, a.y);
-      });
-      const rect = container.getBoundingClientRect();
-      const ratio = Math.max(
-        Math.max(xMax - xMin, 1) / Math.max(rect.width, 1),
-        Math.max(yMax - yMin, 1) / Math.max(rect.height, 1),
-      );
       renderer.getCamera().animate(
-        { x: (xMin + xMax) / 2, y: (yMin + yMax) / 2, ratio: ratio * 1.2 },
+        { x: 0.5, y: 0.5, angle: 0, ratio: 1.15 },
         { duration: 400 },
       );
     };
