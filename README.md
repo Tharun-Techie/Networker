@@ -10,7 +10,10 @@ documents) + Redis (queue/cache). FastAPI backend, React+TS+Sigma.js frontend.
 cp .env.example .env
 docker compose up --build          # core: postgres, neo4j, redis, minio, backend, frontend
 docker compose --profile search up # also start OpenSearch
+docker compose --profile worker up # also start arq background worker
 ```
+
+Local worker without Docker (needs Redis running): `cd backend && arq app.worker.WorkerSettings`.
 
 - Backend OpenAPI: http://localhost:8000/docs
 - Frontend: http://localhost:5173

@@ -12,6 +12,9 @@ down:
 backend-test:
 	cd backend && pytest -q
 
+worker:
+	cd backend && arq app.worker.WorkerSettings
+
 frontend-dev:
 	cd frontend && npm install && npm run dev
 

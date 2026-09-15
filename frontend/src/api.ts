@@ -39,10 +39,13 @@ async function get<T>(path: string): Promise<T> {
 
 export const api = {
   search: (q: string) => get<SearchHit[]>(`/search?q=${encodeURIComponent(q)}`),
-  expand: (id: string, depth = 1, rel: string[] = []) =>
-    get<GraphResult>(
-      `/graph/node/${id}/expand?depth=${depth}${rel.map((r) => `&rel=${r}`).join("")}`
-    ),
+  expand: (id: string, depth = 1, rel: string[] = [], since = "", until = "") => {
+    const params = new URLSearchParams({ depth: String(depth) });
+    rel.forEach((r) => params.append("rel", r));
+    if (since) params.set("since", since);
+    if (until) params.set("until", until);
+    return get<GraphResult>(`/graph/node/${id}/expand?${params.toString()}`);
+  },
   path: (from: string, to: string) =>
     get<GraphResult>(`/graph/path?from=${from}&to=${to}`),
   common: (a: string, b: string) => get<GraphResult>(`/graph/common?a=${a}&b=${b}`),

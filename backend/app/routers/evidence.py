@@ -9,8 +9,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db_postgres import get_session
 from app.models_sql import EvidenceDocument
+from app.services import storage
 
 router = APIRouter(prefix="/api/evidence", tags=["evidence"])
+
+
+class UploadUrlRequest(BaseModel):
+    filename: str
+    content_type: str = "application/octet-stream"
+
+
+class UploadUrlOut(BaseModel):
+    key: str
+    url: str
+    bucket: str
+    expires_in: int
+
+
+@router.post("/upload-url", response_model=UploadUrlOut)
+async def upload_url(data: UploadUrlRequest):
+    """Step 1 of evidence upload: get a presigned PUT URL, upload bytes
+    directly to S3, then POST the metadata (with s3_key) below."""
+    try:
+        return storage.presigned_upload_url(data.filename, data.content_type)
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
 
 
 class EvidenceCreate(BaseModel):
