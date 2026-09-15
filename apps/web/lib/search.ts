@@ -1,3 +1,4 @@
+import neo4j from "neo4j-driver";
 import { runRead } from "./neo4j";
 
 /**
@@ -55,7 +56,7 @@ export async function searchNodes(q: string, limit = 20): Promise<SearchHit[]> {
       "CALL db.index.fulltext.queryNodes('node_names_ft', $q) " +
         "YIELD node, score RETURN node {.*, label: head(labels(node))} AS node, " +
         "score ORDER BY score DESC LIMIT $limit",
-      { q: query, limit },
+      { q: query, limit: neo4j.int(Math.trunc(limit)) },
     );
     return rows
       .map((r) => {
