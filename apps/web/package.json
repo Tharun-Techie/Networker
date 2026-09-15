@@ -18,6 +18,7 @@
     "@opensearch-project/opensearch": "^2.10.0",
     "bcryptjs": "^2.4.3",
     "graphology": "^0.26.0",
+    "graphology-layout-forceatlas2": "^0.10.1",
     "jose": "^5.9.0",
     "neo4j-driver": "^5.26.0",
     "next": "^14.2.5",
