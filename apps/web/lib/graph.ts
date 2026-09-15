@@ -9,6 +9,16 @@ import {
   type GraphNode,
 } from "@networker/shared";
 import { runRead, runWrite } from "./neo4j";
+import { ApiError } from "./api-error";
+
+/** Taxonomy violations are 400s (parity with FastAPI's ValueError → 400). */
+function relOr400(rel: string): void {
+  try {
+    assertRelType(rel);
+  } catch (err) {
+    throw new ApiError(400, err instanceof Error ? err.message : String(err));
+  }
+}
 
 /**
  * Graph query service — the ONLY place raw Cypher lives.
@@ -42,8 +52,51 @@ function cleanNode(raw: unknown): GraphNode {
   return n as unknown as GraphNode;
 }
 
+/** Recursively plain-ify driver values: neo4j Integer {low,high} → number,
+ *  DateTime objects (from legacy cypher-seed `datetime()` props) → ISO string. */
+function toPlainValue(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(toPlainValue);
+  if (v && typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    const keys = Object.keys(o);
+    if (keys.length === 2 && typeof o.low === "number" && typeof o.high === "number") {
+      return (o.high as number) * 4294967296 + (o.low as number);
+    }
+    if ("year" in o && "month" in o && "day" in o && "hour" in o) {
+      const num = (x: unknown): number =>
+        typeof x === "object" && x !== null && "low" in (x as object)
+          ? (x as { low: number }).low
+          : Number(x);
+      try {
+        return new Date(
+          Date.UTC(
+            num(o.year), num(o.month) - 1, num(o.day),
+            num(o.hour), num(o.minute ?? 0), num(o.second ?? 0),
+            Math.floor(num(o.nanosecond ?? 0) / 1e6),
+          ),
+        ).toISOString();
+      } catch {
+        return o;
+      }
+    }
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(o)) out[k] = toPlainValue(val);
+    return out;
+  }
+  return v;
+}
+
+function cleanEdge(raw: unknown): GraphEdge {
+  return toPlainValue(raw) as GraphEdge;
+}
+
 const NODE_PROJ = "n {.*, label: head(labels(n))}";
-const REL_PROJ = (v: string) => `${v} {.*, rel_type: type(${v})}`;
+const nodeProj = (v: string) => `${v} {.*, label: head(labels(${v}))}`;
+/** Edge projection: properties + type + endpoint ids (map projections alone
+ *  carry no endpoints, so from_id/to_id are projected explicitly). */
+const relProj = (v: string) =>
+  `${v} {.*, rel_type: type(${v}), from_id: startNode(${v}).id, to_id: endNode(${v}).id}`;
+const REL_PROJ = relProj;
 
 export async function createNode(input: {
   id?: string;
@@ -52,7 +105,11 @@ export async function createNode(input: {
   aliases?: string[];
   attributes?: Record<string, unknown>;
 }): Promise<GraphNode> {
-  assertNodeType(input.type);
+  try {
+    assertNodeType(input.type);
+  } catch (err) {
+    throw new ApiError(400, err instanceof Error ? err.message : String(err));
+  }
   const id = input.id ?? randomUUID();
   const aliases = input.aliases ?? [];
   const rows = await runWrite(
@@ -93,7 +150,7 @@ export async function createEdge(input: {
 }): Promise<GraphEdge> {
   // All edges require source + confidence. AI writes inferred; promotion to
   // verified happens only via updateEdgeConfidence with a human actor.
-  assertRelType(input.rel_type);
+  relOr400(input.rel_type);
   const rows = await runWrite(
     `MATCH (a {id: $from_id}), (b {id: $to_id}) ` +
       `CREATE (a)-[r:\`${input.rel_type}\` {id: randomUUID(), ` +
@@ -112,12 +169,12 @@ export async function createEdge(input: {
       created_at: new Date().toISOString(),
     },
   );
-  return (rows[0]?.r ?? {}) as GraphEdge;
+  return (rows[0]?.r != null ? cleanEdge(rows[0].r) : {}) as GraphEdge;
 }
 
 function validateRelList(relTypes?: string[]): string {
   if (!relTypes || relTypes.length === 0) return "";
-  for (const r of relTypes) assertRelType(r);
+  for (const r of relTypes) relOr400(r);
   return ":" + relTypes.map((r) => `\`${r}\``).join("|");
 }
 
@@ -144,8 +201,8 @@ export async function expand(
   const where = conds.length > 0 ? `WHERE ALL(x IN relationships(p) WHERE ${conds.join(" AND ")})` : "";
   const rows = await runRead(
     `MATCH p = (src {id: $node_id})-[${rel}*1..${d}]-(n) ${where} ` +
-      `RETURN [m IN nodes(p) | m {.*, label: head(labels(m))}] AS ns, ` +
-      `[q IN relationships(p) | q {.*, rel_type: type(q)}] AS rs LIMIT 500`,
+      `RETURN [m IN nodes(p) | ${nodeProj("m")}] AS ns, ` +
+      `[q IN relationships(p) | ${relProj("q")}] AS rs LIMIT 500`,
     params,
   );
   return rowsToGraph(rows);
@@ -178,7 +235,7 @@ function rowsToGraph(rows: Array<Record<string, unknown>>): {
       const v = row[key];
       const list = Array.isArray(v) ? v : v ? [v] : [];
       for (const e of list) {
-        const edge = e as GraphEdge;
+        const edge = cleanEdge(e);
         if (edge && typeof edge === "object" && (edge.id ?? edge.source)) {
           edges.set(edge.id ?? String(edges.size), edge);
         }
@@ -191,22 +248,22 @@ function rowsToGraph(rows: Array<Record<string, unknown>>): {
 export async function shortestPath(fromId: string, toId: string) {
   const rows = await runRead(
     `MATCH p = shortestPath((a {id: $from_id})-[*..6]-(b {id: $to_id})) ` +
-      `RETURN [m IN nodes(p) | m {.*, label: head(labels(m))}] AS nodes, ` +
-      `[q IN relationships(p) | q {.*, rel_type: type(q)}] AS edges`,
+      `RETURN [m IN nodes(p) | ${nodeProj("m")}] AS nodes, ` +
+      `[q IN relationships(p) | ${relProj("q")}] AS edges`,
     { from_id: fromId, to_id: toId },
   );
   if (rows.length === 0) return { nodes: [], edges: [] };
   const row = rows[0]!;
   return {
     nodes: ((row.nodes as unknown[]) ?? []).map(cleanNode),
-    edges: (row.edges as GraphEdge[]) ?? [],
+    edges: (((row.edges as unknown[]) ?? []) as unknown[]).map(cleanEdge),
   };
 }
 
 export async function commonConnections(a: string, b: string) {
   const rows = await runRead(
     `MATCH (x {id: $a})--(c)--(y {id: $b}) WHERE x <> y ` +
-      `RETURN c {.*, label: head(labels(c))} AS node LIMIT 100`,
+      `RETURN ${nodeProj("c")} AS node LIMIT 100`,
     { a, b },
   );
   return { nodes: rows.map((r) => cleanNode(r.node)), edges: [] };
@@ -217,9 +274,9 @@ export async function sharedEmployment(orgAId: string, orgBId: string) {
   const rows = await runRead(
     `MATCH (p:Person)-[r1]->(a {id: $a}), (p)-[r2]->(b {id: $b}) ` +
       `WHERE type(r1) IN $work_rels AND type(r2) IN $work_rels ` +
-      `RETURN p {.*, label: head(labels(p))} AS person, ` +
-      `r1 {.*, rel_type: type(r1)} AS r1, r2 {.*, rel_type: type(r2)} AS r2, ` +
-      `a {.*, label: head(labels(a))} AS a, b {.*, label: head(labels(b))} AS b`,
+      `RETURN ${nodeProj("p")} AS person, ` +
+      `${relProj("r1")} AS r1, ${relProj("r2")} AS r2, ` +
+      `${nodeProj("a")} AS a, ${nodeProj("b")} AS b`,
     { a: orgAId, b: orgBId, work_rels: WORK_REL_TYPES },
   );
   return rowsToGraph(rows);
@@ -229,11 +286,11 @@ export async function sharedEmployment(orgAId: string, orgBId: string) {
 export async function connectors(orgAId: string, orgBId: string) {
   const rows = await runRead(
     `MATCH (a {id: $a})-[r1]-(p:Person)-[r2]-(b {id: $b}) WHERE a <> b ` +
-      `RETURN a {.*, label: head(labels(a))} AS a, ` +
-      `r1 {.*, rel_type: type(r1)} AS r1, ` +
-      `p {.*, label: head(labels(p))} AS p, ` +
-      `r2 {.*, rel_type: type(r2)} AS r2, ` +
-      `b {.*, label: head(labels(b))} AS b LIMIT 200`,
+      `RETURN ${nodeProj("a")} AS a, ` +
+      `${relProj("r1")} AS r1, ` +
+      `${nodeProj("p")} AS p, ` +
+      `${relProj("r2")} AS r2, ` +
+      `${nodeProj("b")} AS b LIMIT 200`,
     { a: orgAId, b: orgBId },
   );
   return rowsToGraph(rows);
@@ -241,12 +298,12 @@ export async function connectors(orgAId: string, orgBId: string) {
 
 /** Board members serving across the given organizations. */
 export async function boardOverlap(orgIds: string[]) {
-  if (orgIds.length === 0) throw new Error("org_ids must not be empty");
+  if (orgIds.length === 0) throw new ApiError(400, "org_ids must not be empty");
   const rows = await runRead(
     `MATCH (p:Person)-[r]->(o) WHERE o.id IN $org_ids AND type(r) IN $board_rels ` +
-      `RETURN p {.*, label: head(labels(p))} AS person, ` +
-      `r {.*, rel_type: type(r)} AS r, ` +
-      `o {.*, label: head(labels(o))} AS o LIMIT 500`,
+      `RETURN ${nodeProj("p")} AS person, ` +
+      `${relProj("r")} AS r, ` +
+      `${nodeProj("o")} AS o LIMIT 500`,
     { org_ids: orgIds, board_rels: BOARD_REL_TYPES },
   );
   return rowsToGraph(rows);
@@ -256,14 +313,14 @@ export async function boardOverlap(orgIds: string[]) {
 export async function timeline(nodeId: string): Promise<Array<{ edge: GraphEdge; neighbor: GraphNode }>> {
   const rows = await runRead(
     `MATCH (n {id: $node_id})-[r]-(m) ` +
-      `RETURN r {.*, rel_type: type(r)} AS edge, ` +
-      `m {.*, label: head(labels(m))} AS neighbor ORDER BY r.start_date ASC`,
+      `RETURN ${relProj("r")} AS edge, ` +
+      `${nodeProj("m")} AS neighbor ORDER BY r.start_date ASC`,
     { node_id: nodeId },
   );
   const out = rows
     .filter((r) => r.edge && typeof r.edge === "object")
     .map((r) => ({
-      edge: r.edge as GraphEdge,
+      edge: cleanEdge(r.edge),
       neighbor:
         r.neighbor && typeof r.neighbor === "object"
           ? cleanNode(r.neighbor)
@@ -285,14 +342,14 @@ export async function updateEdgeConfidence(
   actor: string,
 ): Promise<GraphEdge> {
   if (confidence === "verified" && !actor) {
-    throw new Error("Promoting to verified requires a human actor");
+    throw new ApiError(400, "Promoting to verified requires a human actor");
   }
   const rows = await runWrite(
     `MATCH ()-[r {id: $edge_id}]->() ` +
       `SET r.confidence = $confidence, r.last_verified_by = $actor RETURN ${REL_PROJ("r")}`,
     { edge_id: edgeId, confidence, actor },
   );
-  return (rows[0]?.r ?? {}) as GraphEdge;
+  return (rows[0]?.r != null ? cleanEdge(rows[0].r) : {}) as GraphEdge;
 }
 
 /** Force-inferred persistence for auto-ingested candidates (parity with ingestion.py). */
