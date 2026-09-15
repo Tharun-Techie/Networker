@@ -59,8 +59,9 @@ async def run_read(query: str, params: dict[str, Any] | None = None) -> list[dic
 
 
 async def run_write(query: str, params: dict[str, Any] | None = None) -> list[dict]:
+    # Single-statement autocommit write: consume INSIDE the session scope.
+    # (execute_write closes the tx before an unconsumed async result can be
+    # read, raising ResultConsumedError.)
     async with get_session() as session:
-        result = await session.execute_write(
-            lambda tx: tx.run(query, params or {})
-        )
+        result = await session.run(query, params or {})
         return [record.data() async for record in result]
