@@ -1,44 +1,46 @@
 // MVP demo seed — illustrative Tata-ecosystem subgraph from the product concept.
 // Idempotent (MERGE-based). Load via:
-//   cat backend/seed_tata.cypher | cypher-shell -a $NEO4J_URI -u $NEO4J_USER -p $NEO4J_PASSWORD
+//   cypher-shell -a $NEO4J_URI -u $NEO4J_USER -p $NEO4J_PASSWORD -f backend/seed_tata.cypher
 // Demo data for local exploration only — verify against real sources before use.
+// NOTE: Neo4j cannot store map properties, so attributes live as a JSON
+// string (attributes_json); the API decodes it back to `attributes`.
 
 MERGE (chandra:Person {id: 'person-n-chandrasekaran'})
 SET chandra.name = 'N. Chandrasekaran',
     chandra.aliases = ['Natarajan Chandrasekaran', 'N Chandrasekaran'],
     chandra.aliases_text = 'N. Chandrasekaran Natarajan Chandrasekaran N Chandrasekaran',
-    chandra.attributes = {profession: 'Executive', designation: 'Chairman', location: 'Mumbai'};
+    chandra.attributes_json = '{"profession": "Executive", "designation": "Chairman", "location": "Mumbai"}';
 
 MERGE (ratan:Person {id: 'person-ratan-tata'})
 SET ratan.name = 'Ratan Tata',
     ratan.aliases = [],
     ratan.aliases_text = 'Ratan Tata',
-    ratan.attributes = {profession: 'Industrialist', designation: 'Chairman Emeritus', location: 'Mumbai'};
+    ratan.attributes_json = '{"profession": "Industrialist", "designation": "Chairman Emeritus", "location": "Mumbai"}';
 
 MERGE (fam:Family {id: 'family-tata'})
 SET fam.name = 'Tata family', fam.aliases_text = 'Tata family',
-    fam.attributes = {location: 'Mumbai'};
+    fam.attributes_json = '{"location": "Mumbai"}';
 
 MERGE (sons:Organization {id: 'org-tata-sons'})
 SET sons.name = 'Tata Sons', sons.aliases_text = 'Tata Sons',
-    sons.attributes = {industry: 'Holding', location: 'Mumbai'};
+    sons.attributes_json = '{"industry": "Holding", "location": "Mumbai"}';
 
 MERGE (motors:Organization {id: 'org-tata-motors'})
 SET motors.name = 'Tata Motors', motors.aliases_text = 'Tata Motors',
-    motors.attributes = {industry: 'Automotive', location: 'Mumbai'};
+    motors.attributes_json = '{"industry": "Automotive", "location": "Mumbai"}';
 
 MERGE (tcs:Organization {id: 'org-tcs'})
 SET tcs.name = 'TCS', tcs.aliases = ['Tata Consultancy Services'],
     tcs.aliases_text = 'TCS Tata Consultancy Services',
-    tcs.attributes = {industry: 'IT Services', location: 'Mumbai'};
+    tcs.attributes_json = '{"industry": "IT Services", "location": "Mumbai"}';
 
 MERGE (steel:Organization {id: 'org-tata-steel'})
 SET steel.name = 'Tata Steel', steel.aliases_text = 'Tata Steel',
-    steel.attributes = {industry: 'Steel', location: 'Mumbai'};
+    steel.attributes_json = '{"industry": "Steel", "location": "Mumbai"}';
 
 MERGE (capital:Organization {id: 'org-tata-capital'})
 SET capital.name = 'Tata Capital', capital.aliases_text = 'Tata Capital',
-    capital.attributes = {industry: 'Financial Services', location: 'Mumbai'};
+    capital.attributes_json = '{"industry": "Financial Services", "location": "Mumbai"}';
 
 // Career chain: TCS (1987) -> TCS CEO -> Tata Sons Chairman
 MERGE (chandra)-[e1:employee_of]->(tcs)
