@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     opensearch_url: str = "http://localhost:9200"
     s3_endpoint_url: str = "http://localhost:9000"
     s3_bucket: str = "networker-evidence"
+    s3_access_key: str = "networker"
+    s3_secret_key: str = "networker_dev_minio"
     jwt_secret: str = "dev-secret-change-me"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60

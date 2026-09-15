@@ -29,6 +29,30 @@ def create_token(sub: str) -> str:
     return jwt.encode({"sub": sub, "exp": exp}, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
+class Register(BaseModel):
+    email: str
+    password: str
+    role: str = "editor"
+
+
+class UserOut(BaseModel):
+    id: str
+    email: str
+    role: str
+
+
+@router.post("/register", response_model=UserOut, status_code=201)
+async def register(data: Register, session: AsyncSession = Depends(get_session)):
+    existing = (await session.execute(select(User).where(User.email == data.email))).scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Email already registered")
+    user = User(email=data.email, password_hash=pwd.hash(data.password), role=data.role)
+    session.add(user)
+    await session.commit()
+    await session.refresh(user)
+    return UserOut(id=str(user.id), email=user.email, role=user.role)
+
+
 @router.post("/token", response_model=Token)
 async def login(form: OAuth2PasswordRequestForm = Depends(), session: AsyncSession = Depends(get_session)):
     user = (await session.execute(select(User).where(User.email == form.username))).scalar_one_or_none()

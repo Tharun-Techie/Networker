@@ -7,12 +7,16 @@ export const REL_TYPES = [
 export const NODE_TYPES = ["Person", "Organization", "Family", "Institution"];
 
 export default function FilterPanel({
-  rel, setRel, depth, setDepth,
+  rel, setRel, depth, setDepth, since, setSince, until, setUntil,
 }: {
   rel: string[];
   setRel: (r: string[]) => void;
   depth: number;
   setDepth: (d: number) => void;
+  since: string;
+  setSince: (s: string) => void;
+  until: string;
+  setUntil: (s: string) => void;
 }) {
   const toggle = (r: string) =>
     setRel(rel.includes(r) ? rel.filter((x) => x !== r) : [...rel, r]);
@@ -24,6 +28,14 @@ export default function FilterPanel({
           type="number" min={1} max={4} value={depth}
           onChange={(e) => setDepth(Number(e.target.value))}
         />
+      </label>
+      <label>
+        Active since:{" "}
+        <input type="date" value={since} onChange={(e) => setSince(e.target.value)} />
+      </label>
+      <label>
+        Active until:{" "}
+        <input type="date" value={until} onChange={(e) => setUntil(e.target.value)} />
       </label>
       <fieldset>
         <legend>Relationship types</legend>

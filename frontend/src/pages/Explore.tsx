@@ -11,6 +11,8 @@ export default function Explore() {
   const [edge, setEdge] = useState<GraphEdge | null>(null);
   const [rel, setRel] = useState<string[]>([]);
   const [depth, setDepth] = useState(1);
+  const [since, setSince] = useState("");
+  const [until, setUntil] = useState("");
   const [err, setErr] = useState("");
 
   const doSearch = async () => {
@@ -25,7 +27,7 @@ export default function Explore() {
   const doExpand = async (id: string) => {
     setErr("");
     try {
-      setGraph(await api.expand(id, depth, rel));
+      setGraph(await api.expand(id, depth, rel, since, until));
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Expand failed");
     }
@@ -45,7 +47,10 @@ export default function Explore() {
           </li>
         ))}
       </ul>
-      <FilterPanel rel={rel} setRel={setRel} depth={depth} setDepth={setDepth} />
+      <FilterPanel
+        rel={rel} setRel={setRel} depth={depth} setDepth={setDepth}
+        since={since} setSince={setSince} until={until} setUntil={setUntil}
+      />
       <GraphCanvas nodes={graph.nodes} edges={graph.edges} onSelectEdge={setEdge} />
       <EvidencePanel edge={edge} />
     </div>
