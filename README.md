@@ -54,7 +54,9 @@ apply once with `psql -f`. Services expected locally:
 |---|---|
 | `POST /api/nodes`, `GET /api/nodes/{id}` | `POST /api/nodes`, `GET /api/nodes/[id]` |
 | `POST /api/edges`, `PATCH /api/edges/{id}/confidence` | same under `/api/edges…` |
+| `DELETE /api/edges/{id}` (new) | remove a relationship, nodes untouched |
 | `GET /graph/node/{id}/expand`, `/timeline`, `/path`, `/common`, `/shared-employment`, `/connectors`, `/board-overlap`, `POST /graph/insight` | same paths under `/api/graph…` |
+| `GET /graph/hierarchy` (new) | ownership / family / corporate trees |
 | `GET /search` | `GET /api/search` |
 | `POST/GET /api/evidence`, `POST /api/evidence/upload-url` | same under `/api/evidence…` |
 | `POST /api/auth/register`, `POST /api/auth/token` (OAuth2 form) | `POST /api/auth/register`, `POST /api/auth/login` (JSON, cookie session) |

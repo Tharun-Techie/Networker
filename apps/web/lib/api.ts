@@ -118,6 +118,8 @@ export const api = {
       `/api/edges/${edgeId}/confidence?confidence=${confidence}&actor=${encodeURIComponent(actor)}`,
       { method: "PATCH" },
     ),
+  deleteEdge: (edgeId: string) =>
+    req<{ deleted: string }>(`/api/edges/${edgeId}`, { method: "DELETE" }),
   register: (body: { email: string; password: string; role?: string }) =>
     post<{ id: string; email: string; role: string }>(`/api/auth/register`, body),
   login: (body: { email: string; password: string }) =>
