@@ -1,58 +1,74 @@
-# Project Networker
+# Networker — monorepo (Next.js + Neo4j)
 
-Relationship-intelligence product: graph-first (Neo4j) + Postgres (users,
-evidence metadata, jobs, audit) + OpenSearch (names/aliases) + S3 (source
-documents) + Redis (queue/cache). FastAPI backend, React+TS+Sigma.js frontend.
+Relationship-intelligence platform: people, organizations, families, and
+institutions mapped into a searchable visual network. One Next.js app serves
+both the UI and the API — no separate Python backend to operate.
 
-## Quick start (local dev, needs Docker)
+```
+networker-mono/
+  apps/web/          Next.js 14 App Router (UI + API routes, TypeScript)
+    app/             pages: Explore, Search/Query, Person, Org, Add, Login
+    app/api/         API routes (nodes, edges, graph, search, evidence, auth, jobs)
+    lib/             neo4j/pg/s3/auth clients + graph/search services
+    scripts/         db:init (constraints), db:seed (Tata demo graph)
+  packages/shared/   taxonomy, insight summarizer, entity resolution (pure TS)
+```
+
+## Tech choices (matched to complexity)
+
+| Concern | Choice | Why |
+|---|---|---|
+| Full stack | Next.js 14 App Router + TypeScript | One deployable, UI + API in one process, no CORS/proxy hacks |
+| Graph store | Neo4j (`neo4j-driver`) | Native graph traversals; server-side Cypher only, clients never send queries |
+| Relational store | Postgres (`pg`, raw SQL) | Evidence metadata, users, jobs — boring tables, no ORM needed |
+| Validation | `zod` | Replaces pydantic with the same guarantees at the route boundary |
+| Auth | `jose` (JWT) + `bcryptjs` + httpOnly cookie | Same model as before (register/login/roles), no Auth0 dependency |
+| Evidence blobs | AWS SDK v3 presigned PUT (S3/MinIO) | Direct-to-object upload; Postgres keeps metadata, graph keeps IDs |
+| Search | OpenSearch optional → Neo4j full-text fallback | Same degraded-mode behavior as before |
+| Graph viz | Sigma.js + graphology | Unchanged — framework-agnostic, works in client components |
+| Background jobs | On-demand `/api/jobs` routes | arq/Redis replaced: ingest + duplicate scan run via API (cron-compatible) |
+
+## Quick start
 
 ```bash
-cp .env.example .env
-docker compose up --build          # core: postgres, neo4j, redis, minio, backend, frontend
-docker compose --profile search up # also start OpenSearch
-docker compose --profile worker up # also start arq background worker
+cd networker-mono
+npm install
+cp apps/web/.env.example apps/web/.env.local   # adjust creds if needed
+
+npm run db:init    # Neo4j constraints + full-text index
+npm run db:seed    # Tata demo graph (8 nodes, 10 edges)
+
+npm run dev        # http://localhost:3000
 ```
 
-Local worker without Docker (needs Redis running): `cd backend && arq app.worker.WorkerSettings`.
+Postgres schema lives alongside the app (`./postgres_init/init.sql`);
+apply once with `psql -f`. Services expected locally:
 
-- Backend OpenAPI: http://localhost:8000/docs
-- Frontend: http://localhost:5173
-- Neo4j browser: http://localhost:7474
+- Neo4j bolt `localhost:7687` (user `neo4j`)
+- Postgres `localhost:5432` (db `networker`)
+- OpenSearch / MinIO optional — endpoints degrade to 503 with a clear message
 
-## Backend dev without Docker
+## API parity map (old → new)
 
-```bash
-cd backend
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-pytest -q
-```
+| FastAPI | Next.js |
+|---|---|
+| `POST /api/nodes`, `GET /api/nodes/{id}` | `POST /api/nodes`, `GET /api/nodes/[id]` |
+| `POST /api/edges`, `PATCH /api/edges/{id}/confidence` | same under `/api/edges…` |
+| `GET /graph/node/{id}/expand`, `/timeline`, `/path`, `/common`, `/shared-employment`, `/connectors`, `/board-overlap`, `POST /graph/insight` | same paths under `/api/graph…` |
+| `GET /search` | `GET /api/search` |
+| `POST/GET /api/evidence`, `POST /api/evidence/upload-url` | same under `/api/evidence…` |
+| `POST /api/auth/register`, `POST /api/auth/token` (OAuth2 form) | `POST /api/auth/register`, `POST /api/auth/login` (JSON, cookie session) |
+| arq `ingest_candidates`, `scan_duplicates`, `enrich_node` | `POST /api/jobs` (ingest), `GET /api/jobs` (duplicates), `POST /api/nodes/[id]/enrich` |
 
-Backend runs in degraded mode when Neo4j/Postgres/Redis are unreachable:
-graph/search endpoints return 503 with a clear message instead of crashing.
-Unit tests mock the graph driver so no live DB is needed.
+Behavioral rules preserved: every edge needs `source` + `confidence`;
+auto-ingest forces `inferred`; promotion to `verified` needs a human actor;
+insight keeps FACTS and INFERENCES separate with edge-id citations.
 
-## Key design decisions (locked in schema)
+## Fixes vs the old stack (no regressions, two defects fixed)
 
-1. **Every edge carries `source` (evidence FK), `confidence`
-   (`verified`/`inferred`/`unconfirmed`), `start_date`/`end_date`,
-   `created_by`, `created_at`.** AI extraction always writes
-   `confidence=inferred`; promotion to `verified` requires human review or a
-   stronger source.
-2. **Evidence artifacts live in Postgres + S3,** referenced by ID from Neo4j.
-   The graph stays lean (node/edge metadata only).
-3. **Graph traversal is server-side** (`/graph/expand`, `/graph/path`,
-   `/graph/common` wrap Cypher). The frontend never sends raw Cypher.
-4. **Entity resolution is a background job** (`services/entity_resolution.py`),
-   never inline on write.
-
-## Layout
-
-```
-backend/            FastAPI app, services, tests, neo4j_init.cypher
-postgres_init/      init.sql for users/evidence/jobs/audit tables
-frontend/           Vite React+TS, Sigma.js GraphCanvas
-docker-compose.yml
-Makefile
-```
+- Nodes always carry `label`, edges always carry `rel_type` (projected in
+  Cypher) — the old API omitted both, breaking type filters and edge labels.
+- Multi-hop expand returns **all** nodes along each path (old query dropped
+  intermediate nodes on 2+ hop expansions).
+- No `localhost:8000` browser calls — UI and API share one origin, so the app
+  works through proxied preview URLs with no Vite proxy needed.

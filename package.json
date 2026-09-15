@@ -1,0 +1,19 @@
+{
+  "name": "networker",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=apps/web",
+    "build": "npm run build --workspace=apps/web",
+    "typecheck": "npm run typecheck --workspace=apps/web --workspace=packages/shared",
+    "db:init": "npm run db:init --workspace=apps/web",
+    "db:seed": "npm run db:seed --workspace=apps/web"
+  },
+  "dependencies": {
+    "@networker/shared": "^0.1.0"
+  }
+}

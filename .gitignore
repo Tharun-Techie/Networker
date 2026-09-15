@@ -13,6 +13,8 @@ __pycache__/
 # node
 node_modules/
 frontend/dist/
+.next/
+*.tsbuildinfo
 dist/
 
 # IDE / OS
